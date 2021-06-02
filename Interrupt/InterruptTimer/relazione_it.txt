@@ -1,0 +1,56 @@
+Il programma usa un timer di T = 7 secondi.
+Le sorgenti che generano un interrupt sono:
+- il bottone blu del microcontrollore su PA0, collegato al led blu LD6 (GPIO_PIN_15)
+- un primo bottone esterno al microcontrollore su PB2, collegato al led rosso LD5 (GPIO_PIN_13)
+- un secondo bottone esterno al microcontrollore su PC1, collegato al led arancione LD3 (GPIO_PIN_14)
+
+Il programma è stato inizialmente generato per mezzo dell'IDE CubeMX, quindi dalla "Pinout Configuration" sono stati settati:
+- i led su GPIO_Output
+- PA0 su GPIO_EXTI0, PB2 su GPIO_EXTI2, PC1 su GPIO_EXTI1
+
+si è scelta questa strategia per dedicare ad ogni bottone porte e pin diverse, quindi linee EXTI differenti che non condividono la stessa Interrupt Request (IRC)
+nell'NVIC (Nested Vector Interrupt Controller) e possono attivare diverse ISR (Interrupt Service Routine).
+Infatti solo un pin "PxY" può essere una fonte di interrupt alla volta.
+
+Successivamente vengono abilitati gli interrupt sulle EXTI corrispondenti: come priorità degli interrupt si è scelto di usare per tutti e 3 0x2, mentre come
+sub-priority 0 (perché a seguito di prove empiriche, si è constatato che non ha effetto sul programma perché è impossibile per un essere umano cliccare due bottoni
+e quindi generare due interrupt esattamente nello stesso momento).
+Le priorità degli interrupt sono "dinamiche": partono tutte e tre da 2, ma poi cambiano: l'interrupt gestito rimane con una priorità pari a 2, mentre gli altri due
+interrupt generabili vengono settati ad una priorità pari a 1 (quindi maggiore), cosicchè possano essere gestiti mentre è in esecuzione il primo interrupt e quindi
+interrompere la prima ISR se venissero cliccati i bottoni corrispondenti.
+Successivamente, alla fine del timer, tutte le priorità vengono riportate al valore iniziale 2.
+
+Si sono scelte come priorità di preemption 2 e 1 perché la funzione utilizzata come timer è la HAL_Delay(), che si basa sul clock di sistema SysTick a priorità 0,
+quindi l'utilizzo della funzione HAL_Delay in procedure ISR per gestire gli interrupt può venire bloccato se quegli interrupt non hanno priorità minore
+(e quindi numericamente maggiore) della priorità di SysTick.
+
+La logica del programma è, nel dettaglio, la seguente: alla pressione di un bottone viene generato un interrupt, che viene gestito dalla corrispondente funzione
+EXTI_IRQ_Handler.
+Questa invocherà la funzione predefinita di libreria HAL_GPIO_EXTI_IRQHandler, che dopo un controllo sul pin per verificare effettivamente l'interrupt e una pulizia,
+eseguirà una Callback.
+La funzione di Callback è il cuore vero e proprio del programma.
+
+Il programma sfrutta due variabili globali definite fuori dal main:
+- timer -> una semplice variabile di 8 bit usata come un flag boolean, che serve a capire se il timer è stato già avviato o meno
+- leds -> una variabile di 16 bit dove vengono accumulati in OR i valori dei PIN corrispondenti ai LED da accendere, prima che il timer sia scaduto
+
+Nella Callback, tramite un IF-THEN-ELSE sul valore del PIN passato come parametro, vengono memorizzati:
+- i due interrupt request che potrebbero venire generati e a cui dovrò settare una priorità maggiore
+- il led da accendere, corrispondente al bottone che ha generato l'interrupt corrente
+
+Successivamente se il timer è ancora nullo vuol dire che non è mai stato avviato e quindi non è ancora stato premuto nessun bottone; per cui:
+- si inizializza il timer
+- si aumentano le priorità degli interrupt corrispondenti agli altri due bottoni (cosicché possano interrompere la ISR corrispondente e l'interrupt non venga perso)
+- si fa partire un timer di 7 secondi
+- scaduto il timer viene eseguito un doppio toggle dei LED (quindi li accendo e li spengo), con in mezzo un ciclo for vuoto per rendere meglio il risultato visivamente
+- vengono risettate le priorità di preemption degli interrupt al valore originario, quindi 2
+- vengono pulite (azzerate) le variabili globali del timer e dei led
+
+Naturalmente se si verificherà un interrupt innestato, e quindi verrà premuto un secondo bottone (o anche un terzo), dopo che è stato premuto il primo bottone che ha
+avviato il countdown del timer, la ISR corrispondente non entrerà nell'if sul timer della mutua esclusione, ma si fermerà a settare il corrispondente led da accendere.
+Se però non ci fosse un cambiamento dinamico di priorità degli interrupt, settando come più prioritari quelli dei due bottoni che non hanno fatto partire il timer,
+gli interrupt corrispondenti generati dai due bottoni andrebbero persi perché verrebbe gestito dall'inizio alla fine solo il primo interrupt che ha avviato il timer
+(e quindi verrebbe eseguita la sua ISR tutta di fila, senza mai essere bloccata).
+
+N.B.: il programma sembra funzionare bene anche dopo più esecuzioni, tuttavia la semantica è da intendersi "one shot" e quindi, prima di ogni nuova esecuzione,
+bisognerebbe resettare il microcontrollore premendo il tasto nero
