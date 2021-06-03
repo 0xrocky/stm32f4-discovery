@@ -1,0 +1,4 @@
+# printf() with UART/USART
+
+Friends who have studied C should know the standard library functions printf() and scanf(), the former for printing information to the console, and the latter for reading characters from the keyboard to the program. If printf() is called in the program of the microcontroller, where will it be displayed? The answer is unknowable, because the microcontroller does not have a console, but we can use its peripherals to implement printf(), such as LCD or serial port (the serial port is then connected to the computer to display the print information). The serial port is basically the majority of microcontrollers, and the LCD is not necessarily, so we usually use the serial port to print content.
+So as long as it is a serial port microcontroller, is it possible to print the information by calling printf()?
